@@ -43,7 +43,7 @@
 
 - SSH 端口映射（用于登录）
 - 可用的端口映射（用于节点，至少 1 组，每个协议需要 1 组）
-- 格式：`内部端口:外部端口`，例如 `80:15331`
+- 安装时按提示逐个输入每个协议的内部端口和外部端口
 
 ## 安装
 
@@ -86,15 +86,27 @@ bash <(curl -fsSL https://raw.githubusercontent.com/byJoey/xray-cf-lite/main/xra
 脚本自动检测 NAT 环境。安装时按提示输入端口映射：
 
 ```
-端口映射(3组，逗号分隔): 80:15331,8080:15333,8443:15334
+vless 内部监听端口(xray监听): 80
+vless 外部映射端口(对外暴露): 15331
+trojan 内部监听端口(xray监听): 8080
+trojan 外部映射端口(对外暴露): 15333
+vmess 内部监听端口(xray监听): 8443
+vmess 外部映射端口(对外暴露): 15334
 ```
 
-- 左边（80）= xray 在容器内监听的端口
-- 右边（15331）= 宿主机暴露的外部端口，写入 CF Origin Rules
+- 内部端口 = xray 在容器内监听的端口
+- 外部端口 = 宿主机暴露的映射端口，写入 CF Origin Rules
 
 **外部端口变了怎么办？**
 
 选菜单 6，输入新的外部端口即可。只更新 CF Origin Rules，不重启 xray，几秒完成。
+
+## 崩溃自动重启
+
+xray 进程崩溃后 1 秒自动拉起，无限重启：
+
+- **systemd**：通过 drop-in 配置 `Restart=on-failure`、`RestartSec=1`
+- **OpenRC**：通过 `supervise-daemon` 的 `respawn` 机制，`respawn_delay=1`、`respawn_max=0`（无限）
 
 ## 文件说明
 
