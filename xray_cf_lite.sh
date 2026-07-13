@@ -87,7 +87,7 @@ output_log="/var/log/xray.log"
 error_log="/var/log/xray.log"
 respawn_delay=1
 respawn_max=0
-respawn_period=0
+respawn_period=86400
 supervise_daemon_args="--respawn-delay ${respawn_delay} --respawn-max ${respawn_max} --respawn-period ${respawn_period}"
 supervisor=supervise-daemon
 depend() { need net; after firewall; }
@@ -813,6 +813,16 @@ do_update_ports() {
     fi
 }
 
+# ── 7. 重启 xray ─────────────────────────────────────
+do_restart() {
+    if ! svc_is_active; then
+        echo "xray 当前未运行，正在启动..."
+    else
+        echo "正在重启 xray..."
+    fi
+    restart_xray
+}
+
 # ── 主入口 ────────────────────────────────────────────
 main() {
     [[ "$(id -u)" == "0" ]] || die "请使用 root 运行此脚本"
@@ -836,13 +846,15 @@ main() {
     echo "  4. 修改配置(UUID/端口/路径)"
     echo "  5. 查看当前配置"
     echo "  6. 更新外部端口(NAT换端口)"
+    echo "  7. 重启 xray"
     [[ -n "$current_domain" ]] && echo "     (当前: $current_domain${net_mode:+ [$net_mode]})"
     echo
 
-    read -rp "请选择 [1-6]: " choice
+    read -rp "请选择 [1-7]: " choice
     case "$choice" in
         1) do_install ;; 2) do_uninstall ;; 3) do_show ;;
         4) do_modify ;; 5) do_show_config ;; 6) do_update_ports ;;
+        7) do_restart ;;
         *) die "无效选项: $choice" ;;
     esac
 }
