@@ -85,6 +85,11 @@ command_background=true
 pidfile="/run/xray.pid"
 output_log="/var/log/xray.log"
 error_log="/var/log/xray.log"
+respawn_delay=3
+respawn_max=10
+respawn_period=60
+supervise_daemon_args="--respawn-delay ${respawn_delay} --respawn-max ${respawn_max} --respawn-period ${respawn_period}"
+supervisor=supervise-daemon
 depend() { need net; after firewall; }
 INITEOF
     chmod +x "$XRAY_OPENRC_SCRIPT"
@@ -95,7 +100,22 @@ svc_start()     { if [[ "$INIT_SYSTEM" == "systemd" ]]; then systemctl restart x
 svc_stop()      { if [[ "$INIT_SYSTEM" == "systemd" ]]; then systemctl stop xray &>/dev/null; systemctl disable xray &>/dev/null; else rc-service xray stop &>/dev/null; rc-update del xray default &>/dev/null; fi; true; }
 svc_is_active() { if [[ "$INIT_SYSTEM" == "systemd" ]]; then systemctl is-active xray &>/dev/null; else rc-service xray status &>/dev/null 2>&1; fi; }
 
+ensure_systemd_restart() {
+    # 确保 systemd 下 xray 崩溃自动重启
+    local drop="/etc/systemd/system/xray.service.d"
+    if [[ "$INIT_SYSTEM" == "systemd" && ! -f "$drop/restart.conf" ]]; then
+        mkdir -p "$drop"
+        cat > "$drop/restart.conf" << 'SDEOF'
+[Service]
+Restart=on-failure
+RestartSec=3
+SDEOF
+        systemctl daemon-reload
+    fi
+}
+
 restart_xray() {
+    [[ "$INIT_SYSTEM" == "systemd" ]] && ensure_systemd_restart
     svc_enable
     svc_start || die "xray 重启失败"
     sleep 1
@@ -426,27 +446,19 @@ build_routes() {
 
     if [[ "$net_mode" == "nat" ]]; then
         echo >&2
-        info "NAT 模式: xray 监听内部端口，CF 转发到外部映射端口" >&2
-        info "格式: 内部端口:外部端口  (xray监听:对外暴露)" >&2
-        info "例如选了 3 个协议: 80:15331,8080:15333,8443:15334" >&2
+        info "NAT 模式: 逐个配置每个协议的端口映射" >&2
         echo >&2
-        read -rp "端口映射(${proto_count}组，逗号分隔): " mapping_raw
-        [[ -n "$mapping_raw" ]] || die "端口映射不能为空"
 
-        IFS=',' read -ra pairs <<< "$mapping_raw"
-        [[ ${#pairs[@]} -eq $proto_count ]] || die "映射数量(${#pairs[@]})与协议数量(${proto_count})不一致"
-
-        local pi=0
-        for pair in "${pairs[@]}"; do
-            pair="${pair// /}"
-            local int_port="${pair%%:*}" ext_port="${pair##*:}"
-            [[ "$int_port" =~ ^[0-9]+$ && "$ext_port" =~ ^[0-9]+$ ]] || die "无效映射: $pair"
-            local proto="${protocols[$pi]}"
+        for proto in "${protocols[@]}"; do
+            local int_port ext_port
+            read -rp "${proto} 内部监听端口(xray监听): " int_port
+            [[ "$int_port" =~ ^[0-9]+$ ]] || die "无效端口: $int_port"
+            read -rp "${proto} 外部映射端口(对外暴露): " ext_port
+            [[ "$ext_port" =~ ^[0-9]+$ ]] || die "无效端口: $ext_port"
             local path="${path_prefix}-${PROTO_SUFFIX[$proto]}"
             routes_json=$(echo "$routes_json" | jq \
                 --arg p "$proto" --argjson lp "$((int_port))" --argjson cp "$((ext_port))" --arg pa "$path" \
                 '. + [{protocol:$p, listen_port:$lp, cf_port:$cp, path:$pa}]')
-            pi=$((pi + 1))
         done
     else
         read -rp "自定义端口?(逗号分隔，留空=随机): " custom_ports_raw
@@ -758,20 +770,16 @@ do_update_ports() {
 
     if [[ "$net_mode" == "nat" ]]; then
         info "NAT 模式: 只更新外部端口(CF Origin Rules)，xray 监听端口不变"
-        echo "输入新的外部端口，按当前协议顺序: $(echo "$routes_json" | jq -r '[.[].protocol] | join(",")')"
-        read -rp "新外部端口(逗号分隔，共${pc}个): " new_ext_raw
-        [[ -n "$new_ext_raw" ]] || die "不能为空"
-
-        IFS=',' read -ra new_exts <<< "$new_ext_raw"
-        [[ ${#new_exts[@]} -eq $pc ]] || die "数量不匹配(需要${pc}个)"
+        echo
 
         local new_routes="$routes_json" idx=0
-        for ne in "${new_exts[@]}"; do
-            ne="${ne// /}"
+        while IFS=$'\t' read -r proto old_cp; do
+            read -rp "${proto} 新外部端口(当前=${old_cp}): " ne
+            [[ -n "$ne" ]] || die "不能为空"
             [[ "$ne" =~ ^[0-9]+$ ]] || die "无效端口: $ne"
             new_routes=$(echo "$new_routes" | jq --argjson i $idx --argjson p "$((ne))" '.[$i].cf_port=$p')
             idx=$((idx+1))
-        done
+        done < <(echo "$routes_json" | jq -r '.[] | [.protocol, (.cf_port|tostring)] | @tsv')
 
         echo
         echo "更新预览:"
