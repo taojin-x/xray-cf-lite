@@ -47,17 +47,19 @@
 
 ## 安装
 
-```bash
-curl -fsSL -o xray_cf_lite.sh https://raw.githubusercontent.com/byJoey/xray-cf-lite/main/xray_cf_lite.sh
-chmod +x xray_cf_lite.sh
-bash xray_cf_lite.sh
-```
-
-或者一行：
+不需要落盘，直接联网运行：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/byJoey/xray-cf-lite/main/xray_cf_lite.sh)
 ```
+
+首次运行后自动注册快捷命令 `x`，之后直接输入：
+
+```bash
+x
+```
+
+等效于每次联网拉取最新脚本执行，不在本地留文件。
 
 ## 功能
 
