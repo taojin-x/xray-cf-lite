@@ -85,9 +85,9 @@ command_background=true
 pidfile="/run/xray.pid"
 output_log="/var/log/xray.log"
 error_log="/var/log/xray.log"
-respawn_delay=3
-respawn_max=10
-respawn_period=60
+respawn_delay=1
+respawn_max=0
+respawn_period=0
 supervise_daemon_args="--respawn-delay ${respawn_delay} --respawn-max ${respawn_max} --respawn-period ${respawn_period}"
 supervisor=supervise-daemon
 depend() { need net; after firewall; }
@@ -108,7 +108,7 @@ ensure_systemd_restart() {
         cat > "$drop/restart.conf" << 'SDEOF'
 [Service]
 Restart=on-failure
-RestartSec=3
+RestartSec=1
 SDEOF
         systemctl daemon-reload
     fi
