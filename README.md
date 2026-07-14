@@ -31,11 +31,7 @@
 
 - 域名已托管在 Cloudflare
 - 账号邮箱 + **Global API Key**（在 [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) -> API Keys -> Global API Key 查看）
-- **关闭 Bot Fight Mode**（重要）：
-  1. 进入 Cloudflare Dashboard -> 对应域名 -> Security -> Bots
-  2. 关闭 **Bot Fight Mode** / **Super Bot Fight Mode**
-  3. 或者添加 WAF 自定义规则，对节点域名跳过 Bot Fight Mode
-  4. 不关闭会导致 WebSocket 连接被 CF 拦截（403 challenge）
+- 脚本会自动处理 CF 安全规则（Bot Fight Mode、Security Level、Browser Check），无需手动操作
 
 ### NAT 环境
 
@@ -135,7 +131,7 @@ xray 进程崩溃后 1 秒自动拉起，无限重启：
 
 ## 注意事项
 
-- **必须关闭 Bot Fight Mode**，否则 WS 连接会被 CF 拦截
+- 安装时自动关闭 Bot Fight Mode / Security Level / Browser Check，卸载时自动恢复原值
 - 卸载会完整恢复 CF 配置（DNS 记录、SSL 模式、Origin Rules）到安装前状态
 - CF 凭据保存在服务器本地，不会上传到任何地方
 - 一台服务器同时只支持一组部署（再次安装需先卸载）

@@ -232,6 +232,88 @@ cf_upsert_dns() {
 cf_get_ssl()  { cf_call GET "/zones/$1/settings/ssl" | jq -r '.result.value'; }
 cf_set_ssl()  { cf_call PATCH "/zones/$1/settings/ssl" "$(jq -n --arg v "$2" '{value:$v}')" >/dev/null; }
 
+# ── CF 安全规则 ───────────────────────────────────────
+cf_get_security_level() { cf_call GET "/zones/$1/settings/security_level" | jq -r '.result.value'; }
+cf_set_security_level() { cf_call PATCH "/zones/$1/settings/security_level" "$(jq -n --arg v "$2" '{value:$v}')" >/dev/null; }
+
+cf_get_browser_check() { cf_call GET "/zones/$1/settings/browser_check" | jq -r '.result.value'; }
+cf_set_browser_check() { cf_call PATCH "/zones/$1/settings/browser_check" "$(jq -n --arg v "$2" '{value:$v}')" >/dev/null; }
+
+cf_get_bot_management() { cf_call_raw GET "/zones/$1/bot_management" | jq '.result // {}'; }
+
+cf_set_bot_fight_off() {
+    local zone_id="$1"
+    cf_call_raw PUT "/zones/${zone_id}/bot_management" "$(jq -n '{
+        enable_js: false,
+        sbfm_likely_automated: "allow",
+        sbfm_definitely_automated: "allow",
+        sbfm_verified_bots: "allow",
+        sbfm_static_resource_protection: false
+    }')" | jq -e '.success' &>/dev/null
+}
+
+cf_restore_bot_management() {
+    local zone_id="$1" backup="$2"
+    # 只恢复我们改过的字段
+    local payload
+    payload=$(echo "$backup" | jq '{
+        enable_js: .enable_js,
+        sbfm_likely_automated: .sbfm_likely_automated,
+        sbfm_definitely_automated: .sbfm_definitely_automated,
+        sbfm_verified_bots: .sbfm_verified_bots,
+        sbfm_static_resource_protection: .sbfm_static_resource_protection
+    }')
+    cf_call_raw PUT "/zones/${zone_id}/bot_management" "$payload" | jq -e '.success' &>/dev/null
+}
+
+# 安装时：备份安全设置 -> 关闭拦截
+cf_relax_security() {
+    local zone_id="$1"
+    local sec_level bot_mgmt browser_check
+
+    sec_level=$(cf_get_security_level "$zone_id")
+    browser_check=$(cf_get_browser_check "$zone_id")
+    bot_mgmt=$(cf_get_bot_management "$zone_id")
+
+    # 降低 security level
+    if [[ "$sec_level" != "essentially_off" ]]; then
+        cf_set_security_level "$zone_id" "essentially_off"
+        ok "Security Level: essentially_off"
+    fi
+
+    # 关闭 Browser Integrity Check
+    if [[ "$browser_check" != "off" ]]; then
+        cf_set_browser_check "$zone_id" "off"
+        ok "Browser Check: off"
+    fi
+
+    # 关闭 Bot Fight Mode
+    local sbfm_likely
+    sbfm_likely=$(echo "$bot_mgmt" | jq -r '.sbfm_likely_automated // ""')
+    if [[ "$sbfm_likely" != "allow" ]]; then
+        cf_set_bot_fight_off "$zone_id"
+        ok "Bot Fight Mode: 已关闭"
+    fi
+
+    # 返回备份 JSON
+    jq -n --arg sl "$sec_level" --arg bc "$browser_check" --argjson bm "$bot_mgmt"         '{security_level:$sl, browser_check:$bc, bot_management:$bm}'
+}
+
+# 卸载时：恢复安全设置
+cf_restore_security() {
+    local zone_id="$1" backup="$2"
+    [[ -z "$backup" || "$backup" == "null" ]] && return
+
+    local sl bc bm
+    sl=$(echo "$backup" | jq -r '.security_level // ""')
+    bc=$(echo "$backup" | jq -r '.browser_check // ""')
+    bm=$(echo "$backup" | jq '.bot_management // null')
+
+    [[ -n "$sl" ]] && cf_set_security_level "$zone_id" "$sl" && ok "Security Level 已恢复: $sl"
+    [[ -n "$bc" ]] && cf_set_browser_check "$zone_id" "$bc" && ok "Browser Check 已恢复: $bc"
+    [[ "$bm" != "null" ]] && cf_restore_bot_management "$zone_id" "$bm" && ok "Bot Fight Mode 已恢复"
+}
+
 cf_get_origin_rules() {
     local r; r=$(cf_call_raw GET "/zones/$1/rulesets/phases/http_request_origin/entrypoint")
     echo "$r" | jq -r 'if .success then .result.rules // [] else [] end' 2>/dev/null || echo '[]'
@@ -554,6 +636,10 @@ do_install() {
     apply_origin_rules "$zone_id" "$domain" "$routes_json"
     ok "Origin Rules: ${#protocols[@]} 条"
 
+    # 安全规则：关闭可能拦截 WS 的设置
+    local security_backup
+    security_backup=$(cf_relax_security "$zone_id")
+
     # 订阅
     local links_json
     links_json=$(gen_all_links "$uid" "$domain" "$routes_json")
@@ -567,9 +653,10 @@ do_install() {
         --argjson routes "$routes_json" \
         --arg drid "$dns_record_id" --argjson dex "$dns_existed" --argjson drec "$dns_before" \
         --arg ssl "$ssl_before" --argjson orbk "$origin_rules_before" --argjson links "$links_json" \
+        --argjson secbk "$security_backup" \
         '{domain:$d,zone_id:$z,uuid:$u,short_id:$s,net_mode:$mode,routes:$routes,
           managed_dns_record_id:$drid,dns_backup:{existed:$dex,record:$drec},
-          ssl_backup:$ssl,origin_rules_backup:$orbk,links:$links}')"
+          ssl_backup:$ssl,origin_rules_backup:$orbk,security_backup:$secbk,links:$links}')"
 
     echo
     ok "部署完成"
@@ -610,6 +697,9 @@ do_uninstall() {
                 cf_call_raw DELETE "/zones/${zone_id}/dns_records/${record_id}" >/dev/null 2>&1 || true
                 ok "DNS 已删除"
             fi
+            # 恢复安全规则
+            local sec_bk; sec_bk=$(echo "$state" | jq '.security_backup // null')
+            cf_restore_security "$zone_id" "$sec_bk"
         fi
     else
         echo "无 CF 凭据，跳过恢复"
