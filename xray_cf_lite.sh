@@ -187,16 +187,48 @@ save_cf_account() {
     chmod 600 "$CF_ACCOUNT_PATH"
 }
 
+# 验证 CF 凭据是否有效（用 verify 接口，避免拿到无效 key 继续跑）
+cf_verify_credentials() {
+    local r
+    r=$(curl -s -X GET "${CF_API}/user/tokens/verify" \
+        -H "X-Auth-Email: $CF_EMAIL" -H "X-Auth-Key: $CF_KEY" -H "Content-Type: application/json")
+    # Global API Key 在 tokens/verify 上可能不适用，回退到列 zones 验证
+    if echo "$r" | jq -e '.success == true' &>/dev/null; then
+        return 0
+    fi
+    r=$(curl -s -X GET "${CF_API}/zones?per_page=1" \
+        -H "X-Auth-Email: $CF_EMAIL" -H "X-Auth-Key: $CF_KEY" -H "Content-Type: application/json")
+    echo "$r" | jq -e '.success == true' &>/dev/null
+}
+
 prompt_cf() {
+    # 先尝试复用已保存凭据
     if load_cf_account; then
         local masked="${CF_KEY:0:6}...${CF_KEY: -4}"
         read -rp "复用已保存 CF 凭据 ($CF_EMAIL, Key=$masked)? (Y/n): " ans
-        [[ "${ans,,}" =~ ^(|y|yes)$ ]] && return
+        if [[ "${ans,,}" =~ ^(|y|yes)$ ]]; then
+            if cf_verify_credentials; then
+                return 0
+            fi
+            echo "已保存的 CF 凭据校验失败，请重新输入"
+        fi
     fi
-    read -rp "Cloudflare 邮箱: " CF_EMAIL
-    read -rsp "Cloudflare Global API Key: " CF_KEY; echo
-    [[ -n "$CF_EMAIL" && -n "$CF_KEY" ]] || die "邮箱和 API Key 不能为空"
-    save_cf_account
+    # 循环让用户输入直到校验通过
+    while true; do
+        read -rp "Cloudflare 邮箱: " CF_EMAIL || die "输入已中断"
+        read -rsp "Cloudflare Global API Key: " CF_KEY || die "输入已中断"; echo
+        if [[ -z "$CF_EMAIL" || -z "$CF_KEY" ]]; then
+            echo "邮箱和 API Key 不能为空，请重试"
+            continue
+        fi
+        echo -n "校验凭据... "
+        if cf_verify_credentials; then
+            echo "通过"
+            save_cf_account
+            return 0
+        fi
+        echo "失败：邮箱或 API Key 错误，请重新输入（Ctrl+C 退出）"
+    done
 }
 
 # ── CF DNS / SSL / Origin Rules ───────────────────────
@@ -208,7 +240,7 @@ cf_find_zone() {
             [[ ${#zone_name} -gt ${#best_name} ]] && best_name="$zone_name" && best_id="$zone_id"
         fi
     done <<< "$zones"
-    [[ -n "$best_id" ]] || die "无法匹配 Zone: $domain"
+    [[ -n "$best_id" ]] || return 1
     echo "$best_id"
 }
 
@@ -585,9 +617,22 @@ do_install() {
     net_mode=$(detect_nat)
     [[ "$net_mode" == "nat" ]] && info "检测到 NAT 环境（内网 IP）" || info "直连环境"
 
-    read -rp "绑定域名: " domain
-    [[ -n "$domain" ]] || die "域名不能为空"
     prompt_cf
+
+    # 输入域名并校验能匹配到 CF Zone，失败可重输
+    local domain zone_id
+    while true; do
+        read -rp "绑定域名: " domain || die "输入已中断"
+        if [[ -z "$domain" ]]; then
+            echo "域名不能为空，请重试"
+            continue
+        fi
+        if zone_id=$(cf_find_zone "$domain"); then
+            info "匹配到 Zone: $zone_id"
+            break
+        fi
+        echo "无法在该 CF 账号下匹配 Zone: $domain，请确认域名已托管并重输（Ctrl+C 退出）"
+    done
 
     local protocols_str
     protocols_str=$(prompt_protocols)
@@ -621,8 +666,7 @@ do_install() {
     restart_xray
 
     # CF
-    local zone_id public_ip dns_before ssl_before origin_rules_before dns_record_id
-    zone_id=$(cf_find_zone "$domain")
+    local public_ip dns_before ssl_before origin_rules_before dns_record_id
     public_ip=$(get_public_ip)
     dns_before=$(cf_get_dns "$zone_id" "$domain" || echo "null")
     [[ "$dns_before" == "" ]] && dns_before="null"
@@ -706,6 +750,8 @@ do_uninstall() {
     fi
 
     remove_state
+    rm -f "$LAST_LINKS_PATH" "$CF_ACCOUNT_PATH"
+    ok "已清理订阅快照与 CF 凭据"
     ok "卸载完成"
 }
 

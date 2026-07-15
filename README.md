@@ -61,7 +61,7 @@ x
 
 ```
 1. 安装节点        部署 xray + 配置 CF（DNS/SSL/Origin Rules）+ 生成订阅链接
-2. 卸载            停止 xray + 完整回滚 CF 配置（DNS/SSL/Origin Rules）
+2. 卸载            停止 xray + 回滚 CF 配置(DNS/SSL/Origin Rules) + 清理本地状态/凭据/订阅快照
 3. 查看订阅        显示上次生成的订阅链接
 4. 修改配置        修改 UUID / 端口 / WS 路径（可单改或全改）
 5. 查看当前配置    显示域名、UUID、端口映射、xray 服务状态、订阅链接
@@ -132,8 +132,8 @@ xray 进程崩溃后 1 秒自动拉起，无限重启：
 ## 注意事项
 
 - 安装时自动关闭 Bot Fight Mode / Security Level / Browser Check，卸载时自动恢复原值
-- 卸载会完整恢复 CF 配置（DNS 记录、SSL 模式、Origin Rules）到安装前状态
-- CF 凭据保存在服务器本地，不会上传到任何地方
+- 卸载会完整恢复 CF 配置（DNS 记录、SSL 模式、Origin Rules）到安装前状态，并清理本地 state.json / cf_account.json / 订阅快照
+- CF 凭据保存在服务器本地，不会上传到任何地方；输入时会实时校验，错误可当场重输（不会直接退出）
 - 一台服务器同时只支持一组部署（再次安装需先卸载）
 
 ## 致谢
