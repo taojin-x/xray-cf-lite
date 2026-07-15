@@ -17,7 +17,7 @@ SUB_BASE="https://yx-auto.pages.dev"
 
 declare -A PROTO_SUFFIX=([vless]="vl" [trojan]="tr" [vmess]="vm")
 declare -A PROTO_LABEL=([vless]="VLESS" [trojan]="TROJAN" [vmess]="VMESS")
-declare -A PROTO_FLAG=([vless]="ev" [trojan]="et" [vmess]="evm")
+declare -A PROTO_FLAG=([vless]="ev" [trojan]="et" [vmess]="mess")
 
 # ── 工具 ──────────────────────────────────────────────
 die()     { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -443,7 +443,7 @@ build_link() {
     local uid="$1" domain="$2" proto="$3" path="$4"
     local ev="no" et="no" evm="no"
     case "$proto" in vless) ev="yes";; trojan) et="yes";; vmess) evm="yes";; esac
-    echo "${SUB_BASE}/${uid}/sub?domain=${domain}&epd=yes&epi=yes&egi=no&dkby=yes&ev=${ev}&et=${et}&evm=${evm}&path=$(urlencode "$path")"
+    echo "${SUB_BASE}/${uid}/sub?domain=${domain}&epd=yes&epi=yes&egi=no&dkby=yes&ev=${ev}&et=${et}&mess=${evm}&path=$(urlencode "$path")"
 }
 
 gen_all_links() {
