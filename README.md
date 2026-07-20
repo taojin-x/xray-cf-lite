@@ -46,7 +46,7 @@
 不需要落盘，直接联网运行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/byJoey/xray-cf-lite/main/xray_cf_lite.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/taojin-x/xray-cf-lite/main/xray_cf_lite.sh)
 ```
 
 首次运行后自动注册快捷命令 `x`，之后直接输入：
