@@ -478,16 +478,6 @@ build_link() {
     echo "${SUB_BASE}/${uid}/sub?domain=${domain}&epd=yes&epi=yes&egi=no&dkby=yes&ev=${ev}&et=${et}&mess=${evm}&path=$(urlencode "$path")"
 }
 
-gen_all_links() {
-    local uid="$1" domain="$2" routes_json="$3"
-    local links_json='{}'
-    local proto path link
-    while IFS=$'\t' read -r proto path; do
-        link=$(build_link "$uid" "$domain" "$proto" "$path")
-        links_json=$(echo "$links_json" | jq --arg p "$proto" --arg l "$link" '. + {($p):$l}')
-    done < <(echo "$routes_json" | jq -r '.[] | [.protocol, .path] | @tsv')
-    echo "$links_json"
-}
 
 # ── 状态 ──────────────────────────────────────────────
 load_state() { [[ -f "$STATE_PATH" ]] && cat "$STATE_PATH"; }
